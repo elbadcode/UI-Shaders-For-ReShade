@@ -4,7 +4,7 @@
 // Magnification Settings
 // ------------------------------------------------------------------------------------------------------------------------
 
-    uniform float2 Size <
+    uniform float2 UI_Size <
         ui_label = "Size";
         ui_type = "drag";
         ui_min = 0.0;
@@ -20,7 +20,7 @@
         ui_step = 1.0;
     > = float2(0.0, 0.0);
 
-    uniform float Magnification <
+    uniform float UI_Magnification <
         ui_label = "Magnification";
         ui_type = "drag";
         ui_min = 0.1;
@@ -28,7 +28,7 @@
         ui_step = 0.1;
     > = 1.5;
 
-    uniform float Transition <
+    uniform float UI_Transition <
         ui_label = "Transition";
         ui_type = "drag";
         ui_min = 0.0;
@@ -54,13 +54,17 @@
         ui_type = "combo";
         ui_label = "Hotkey";
         ui_items = "None\0Left Mouse Button\0Right Mouse Button\0Middle Mouse Button\0X1 Mouse Button (Back Mouse Button)\0X2 Mouse Button (Forward Mouse Button)\0Custom Hotkey\0";
-        ui_tooltip = "Select the mouse button or keyboard key code to trigger hotkey behavior. Default custom key code is 0x5A corresponding to the Z key.";
+        ui_tooltip = "Select the mouse button or keyboard key code to trigger hotkey behavior.\nScrolling with this key held will increase/decrease zoom. Default custom key code is 0x5A corresponding to the Z key.";
     > = 0;
+    
+    
+
+
 
     uniform bool IsFollowCursor <
         ui_label = "Follow Cursor";
         ui_tooltip = "Center magnification around cursor position, not the center of the screen.";
-    > = false;
+    > = true;
 
 // ------------------------------------------------------------------------------------------------------------------------
 // Variables
@@ -70,7 +74,7 @@
     static const float PI = 3.141592;
     
     uniform float2 MousePoint < source = "mousepoint"; >;
-    
+    uniform float2 mouse_value < source = "mousewheel"; min = 0.0; max = 10.0; > = 1.0;
     uniform bool MouseLeft_Down < source = "mousebutton"; keycode = 0; mode = ""; >;
     uniform bool MouseLeft_Press < source = "mousebutton"; keycode = 0; mode = "press"; >;
     uniform bool MouseRight_Down < source = "mousebutton"; keycode = 1; mode = ""; >;
@@ -81,7 +85,11 @@
     uniform bool MouseBack_Press < source = "mousebutton"; keycode = 3; mode = "press"; >;
     uniform bool MouseForward_Down < source = "mousebutton"; keycode = 4; mode = ""; >;
     uniform bool MouseForward_Press < source = "mousebutton"; keycode = 4; mode = "press"; >;
-
+    // modifiers
+    uniform bool shift_down < source = "key"; keycode = 0x10; mode = ""; >;
+    uniform bool ctrl_down < source = "key"; keycode = 0x11; mode = ""; >;
+    uniform bool alt_down < source = "key"; keycode = 0x12; mode = ""; >;
+	
     #ifndef CUSTOM_HOTKEY_KEYCODE
         #define CUSTOM_HOTKEY_KEYCODE 0x5A
     #endif
@@ -101,7 +109,21 @@
 // ------------------------------------------------------------------------------------------------------------------------
 // Helper Functions
 // ------------------------------------------------------------------------------------------------------------------------
+
+float smoothScale(float x, float minVal, float maxVal) {
+    // Normalize the value to a 0-1 range
+    float normalized = (x - minVal) / (maxVal - minVal);
+
+    // Apply the cosine function for smooth scaling
+    float smoothed = 0.1 * (1 - cos(normalized * 3.14159265)); // Pi for cosine smoothing
+
+    // Scale back to the original range
+    return minVal + smoothed * (maxVal - minVal);
+}
+
     float4 GetVertex(in uint id) {
+		float sizeAdjust = ctrl_down ? clamp(smoothScale(mouse_value.x, 0.01, 10.0), 0.1, min(BUFFER_WIDTH, BUFFER_HEIGHT)) : 1;
+		const float2 Size = UI_Size * sizeAdjust;
         float4 retval = 0.0;
 
         float2 offset = float2(Offset.x - Size.x / 2.0, Offset.y + Offset.y - Size.y / 2.0);
@@ -228,6 +250,7 @@
 // Pixel Shaders
 // ------------------------------------------------------------------------------------------------------------------------
 
+
     float MagnifyStatusPS(float4 pos: SV_POSITION, float2 texCoord: TEXCOORD) : SV_TARGET {
         return GetHotkeyToggle() ? 1.0 : 0.0;
     }
@@ -237,7 +260,14 @@
     }
 
     float4 MagnifyPS(float4 pos: SV_POSITION, float2 texCoord: TEXCOORD, nointerpolation float2 center : TEXCOORD1) : SV_TARGET {
-        float2 target = center + (texCoord - center) / Magnification;
+
+float magAdjust = !ctrl_down && !alt_down ? clamp( smoothScale(mouse_value.x, 0.01, 10.0) , 0.1, 400.0) : 1;
+float sizeAdjust = ctrl_down && !alt_down ? clamp( smoothScale(mouse_value.x, 0.01, 10.0), 0.1, min(BUFFER_WIDTH, BUFFER_HEIGHT)) : 1;
+const float2 Size = UI_Size * sizeAdjust;
+const float Magnification = UI_Magnification * magAdjust;     
+float transAdjust = alt_down && !ctrl_down ? clamp( smoothScale(5 * mouse_value.x, 0.01, 10.0), 0.1, max(BUFFER_WIDTH, BUFFER_HEIGHT)) : 1;
+const float Transition = UI_Transition * transAdjust;
+float2 target = center + (texCoord - center) / Magnification;
         float d;
         if (Shape == 0) d = sdEllipse((texCoord - center) * BUFFER_SCREEN_SIZE, Size / 2.0);
         else d = sdBox((texCoord - center) * BUFFER_SCREEN_SIZE, Size / 2.0 - EdgeRounding) - EdgeRounding;
